@@ -1,0 +1,13 @@
+[Unit]
+Description=bws System Agent
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/bws --serve
+Environment=osbin=96bd105f30e65f491a9efe240a0b5c71b78a7f17
+Restart=always
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target
