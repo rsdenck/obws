@@ -1,0 +1,33 @@
+# Binary
+obws-server
+
+# Logs
+*.log
+stdout.log
+stderr.log
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.o
+*.a
+
+# Test files
+*_test.go
