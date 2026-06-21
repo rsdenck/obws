@@ -66,7 +66,7 @@ if ($page === 'events') {
     <div class="header-spacer"></div>
     <div class="header-actions">
       <div class="nav-divider"></div>
-      <clr-dropdown class="dropdown">
+      <clr-dropdown class="dropdown" id="user-dropdown">
         <button class="nav-text dropdown-toggle" 
                 clrdropdowntoggle
                 onclick="App.toggleDropdown()"
