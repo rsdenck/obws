@@ -66,16 +66,12 @@ if ($page === 'events') {
     <div class="header-spacer"></div>
     <div class="header-actions">
       <div class="nav-divider"></div>
-      <clr-dropdown class="dropdown" id="user-dropdown">
-        <button class="nav-text dropdown-toggle" 
-                clrdropdowntoggle
-                onclick="App.toggleDropdown()"
-                aria-haspopup="menu" 
-                aria-expanded="false">
-          <clr-icon shape="user" size="24" class="is-inverse user-icon" role="none" style="width: 24px; height: 24px;"></clr-icon>
+      <div class="dropdown" id="user-dropdown">
+        <div class="dropdown-trigger header-user" onclick="App.toggleDropdown()">
+          <i class="fa-regular fa-circle-user"></i>
           <span><?= htmlspecialchars($_SESSION['user']) ?></span>
-          <clr-icon size="10" shape="caret down" class="user-down" role="none" style="width: 10px; height: 10px;"></clr-icon>
-        </button>
+          <i class="fa-solid fa-chevron-down dropdown-chevron"></i>
+        </div>
         <div class="dropdown-menu" id="user-menu">
           <a class="dropdown-item" onclick="App.loadPage('profile');App.closeDropdown()">
             <i class="fa-regular fa-user"></i> Perfil
@@ -94,7 +90,7 @@ if ($page === 'events') {
             <i class="fa-solid fa-right-from-bracket"></i> Sair
           </a>
         </div>
-      </clr-dropdown>
+      </div>
     </div>
   </header>
 
