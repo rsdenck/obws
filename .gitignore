@@ -15,6 +15,11 @@ stderr.log
 .env
 .env.local
 
+# Keys/Sensitive
+chaves.md
+*.key
+*.pub
+
 # IDE
 .vscode/
 .idea/
