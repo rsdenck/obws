@@ -340,7 +340,8 @@ const App = {
                 ['collect','Coletar Telemetria','fa-download',false],
                 ['reboot','Reiniciar','fa-rotate',true],
                 ['poweroff','Desligar','fa-power-off',true],
-              ].map(a => this.btnAcao(a[0], a[1], a[2], 'primary', a[3])).join('')}</div>
+              ].map(a => this.btnAcao(a[0], a[1], a[2], 'primary', a[3])).join('')}
+              <button class="btn btn-danger" onclick="App.confirm('Remover Host','Tem certeza que deseja remover <b>permanentemente</b> este host e todos os seus dados?',()=>App.deleteAgent('${id}'))"><i class="fa-solid fa-trash-can"></i> Remover Host</button></div>
               <hr class="cmd-sep">
               <form onsubmit="App.sendCommand(event, '${id}', 'exec', document.getElementById('exec-in-${id}').value)">
                 <div class="cmd-form"><input type="text" id="exec-in-${id}" placeholder="comando a executar" required><button type="submit" class="btn btn-primary">Executar</button></div>
@@ -675,6 +676,19 @@ const App = {
         </div>
       </div>
     `;
+  },
+
+  // ======================== DELETE AGENT ========================
+  async deleteAgent(agentId) {
+    const el = document.getElementById('app-content');
+    if (!el) return;
+    const result = await this.apiPost('delete_agent', { id: agentId });
+    if (result && result.status === 'ok') {
+      this.showToast('Host removido com sucesso', 'success');
+      this.loadPage('dashboard');
+    } else {
+      this.showToast('Erro ao remover host', 'error');
+    }
   },
 
   // ======================== PREFERENCES ========================

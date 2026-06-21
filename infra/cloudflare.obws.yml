@@ -1,0 +1,11 @@
+tunnel: 65a1a449-2159-429c-97c7-acfc4046fd6b
+credentials-file: /root/.cloudflared/65a1a449-2159-429c-97c7-acfc4046fd6b.json
+
+ingress:
+  - hostname: a.obws.fun
+    service: http://localhost:80
+  - hostname: obws.fun
+    service: http://localhost:80
+  - hostname: www.obws.fun
+    service: http://localhost:80
+  - service: http_status:404

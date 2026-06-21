@@ -278,6 +278,7 @@ pre {
   font-family: inherit;
   line-height: 1.2;
 }
+.btn-xs { padding: 2px 8px; font-size: .75em; vertical-align: middle; }
 .btn:hover { background: #28404d; text-decoration: none; }
 .btn-sm { padding: 4px 10px; font-size: .78em; }
 .btn-full { width: 100%; justify-content: center; padding: 10px; }

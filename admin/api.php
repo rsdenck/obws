@@ -114,6 +114,19 @@ switch ($action) {
         echo json_encode($result ?? ['error' => 'api error']);
         break;
 
+    case 'delete_agent':
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            http_response_code(405);
+            echo '{"error":"use POST"}';
+            exit;
+        }
+        $input = json_decode(file_get_contents('php://input'), true);
+        $id = $input['id'] ?? $_GET['id'] ?? '';
+        if (!$id) { http_response_code(400); echo '{"error":"missing id"}'; exit; }
+        $result = goApi('DELETE', "/api/agents/$id");
+        echo json_encode($result ?? ['error' => 'api error']);
+        break;
+
     case 'pending_count':
         $cmds = goApi('GET', '/api/commands?status=pending') ?? [];
         echo json_encode(['count' => count($cmds)]);

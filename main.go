@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -24,6 +25,62 @@ import (
 var privateKey *[32]byte
 var db *sql.DB
 var logger *log.Logger
+
+// HTTP long-poll trigger system: agents block on /trigger/<agent_id>,
+// server responds when a command is created for that agent.
+var (
+	triggerChans   = make(map[string]chan struct{})
+	triggerChansMu sync.Mutex
+)
+
+func getTriggerChan(agentID string) chan struct{} {
+	triggerChansMu.Lock()
+	defer triggerChansMu.Unlock()
+	if ch, ok := triggerChans[agentID]; ok {
+		return ch
+	}
+	ch := make(chan struct{}, 1)
+	triggerChans[agentID] = ch
+	return ch
+}
+
+func notifyAgent(agentID string) {
+	triggerChansMu.Lock()
+	ch, ok := triggerChans[agentID]
+	triggerChansMu.Unlock()
+	if !ok {
+		logger.Printf("Trigger %s: sem listener", agentID)
+		return
+	}
+	// Non-blocking send: if channel already has a pending trigger, skip
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
+}
+
+func triggerHandler(w http.ResponseWriter, r *http.Request) {
+	agentID := strings.TrimPrefix(r.URL.Path, "/trigger/")
+	agentID = strings.TrimSuffix(agentID, "/")
+	if agentID == "" {
+		http.Error(w, "agent_id obrigatorio", http.StatusBadRequest)
+		return
+	}
+
+	logger.Printf("Trigger long-poll: agente %s aguardando...", agentID)
+	ch := getTriggerChan(agentID)
+
+	// Wait up to 120 seconds for a trigger
+	select {
+	case <-ch:
+		logger.Printf("Trigger long-poll: agente %s acionado", agentID)
+	case <-time.After(120 * time.Second):
+		logger.Printf("Trigger long-poll: agente %s timeout", agentID)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
 
 type TelemetryRequest struct {
 	Data string `json:"data"`
@@ -272,6 +329,26 @@ func queryTelemetryByAgent(agentID string, limit int) ([]TelemetryRecord, error)
 	return records, nil
 }
 
+func deleteAgent(agentID string) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec("DELETE FROM telemetry WHERE agent_id = ?", agentID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM commands WHERE agent_id = ?", agentID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM agents WHERE agent_id = ?", agentID); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
 func listAgents() ([]Agent, error) {
 	rows, err := db.Query(`SELECT agent_id, hostname, last_ip, last_seen, os, kernel, cpu_cores, mem_mb, disk FROM agents ORDER BY last_seen DESC`)
 	if err != nil {
@@ -365,44 +442,24 @@ func createCommand(agentID, action, params string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return res.LastInsertId()
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	// Notify agent via long-poll trigger if connected
+	go notifyAgent(agentID)
+	return id, nil
 }
 
 // formatParams converts params from the admin panel format to the format bws agent expects.
-// bws (shell script) expects JSON-like params for certain actions:
-//
-//	change_password → {"user":"...","password":"..."}   (admin sends: "user pass")
-//	remove_user     → {"user":"..."}                     (admin sends: "user")
-//	add_sudo        → {"user":"..."}                     (admin sends: "user")
-//	exec            → params as-is (or {"command":"..."})
+// bws (shell script) expects params directly (raw string), no JSON wrapping.
 func formatParams(action, params string) string {
 	switch action {
-	case "change_password":
-		parts := strings.SplitN(params, " ", 2)
-		if len(parts) == 2 {
-			return fmt.Sprintf(`{"user":"%s","password":"%s"}`, parts[0], parts[1])
+	case "exec", "cat_file", "grep_search":
+		if params == "__template__" {
+			return ""
 		}
 		return params
-	case "remove_user", "add_sudo":
-		if params != "" && !strings.HasPrefix(params, "{") {
-			return fmt.Sprintf(`{"user":"%s"}`, params)
-		}
-		return params
-	case "write_file":
-		parts := strings.SplitN(params, " ", 2)
-		if len(parts) == 2 {
-			return fmt.Sprintf(`{"path":"%s","content":"%s"}`, parts[0], strings.ReplaceAll(parts[1], `"`, `\"`))
-		}
-		return params
-	case "exec":
-		if params != "" && params != "__template__" && !strings.HasPrefix(params, "{") {
-			return fmt.Sprintf(`{"command":"%s"}`, strings.ReplaceAll(params, `"`, `\"`))
-		}
-		return params
-	case "cat_file":
-		return fmt.Sprintf(`{"command":"cat %s"}`, params)
-	case "grep_search":
-		return fmt.Sprintf(`{"command":"grep -rn '%s' /etc /root /home 2>/dev/null | head -30"}`, strings.ReplaceAll(params, `'`, `'\''`))
 	}
 	if params == "__template__" {
 		return ""
@@ -706,6 +763,21 @@ func resultHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Save command result as telemetry entry too
+	var cmdAction string
+	_ = db.QueryRow("SELECT action FROM commands WHERE id = ?", resultData.CommandID).Scan(&cmdAction)
+	telPayload, _ := json.Marshal(map[string]interface{}{
+		"agent_id":   agentID,
+		"command_id": resultData.CommandID,
+		"action":     cmdAction,
+		"result":     resultData.Result,
+		"status":     resultData.Status,
+	})
+	_, _ = db.Exec(
+		"INSERT INTO telemetry (agent_id, remote_addr, payload, received_at) VALUES (?, ?, ?, ?)",
+		agentID, "", string(telPayload), now,
+	)
+
 	logger.Printf("Resultado recebido: comando %d do agente %s | status=%s", resultData.CommandID, agentID, resultData.Status)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -723,6 +795,7 @@ func apiHandler(w http.ResponseWriter, r *http.Request) {
 			"endpoints": []string{
 				"GET  /api/agents",
 				"GET  /api/agents/{id}",
+				"DELETE  /api/agents/{id}",
 				"GET  /api/agents/{id}/telemetry",
 				"POST /api/command",
 				"GET  /api/commands",
@@ -741,6 +814,16 @@ func apiHandler(w http.ResponseWriter, r *http.Request) {
 	case "agents":
 		if len(parts) >= 2 {
 			agentID := parts[1]
+			if r.Method == http.MethodDelete {
+				if err := deleteAgent(agentID); err != nil {
+					logger.Printf("ERRO ao deletar agente %s: %v", agentID, err)
+					http.Error(w, `{"error":"erro ao deletar agente"}`, http.StatusInternalServerError)
+					return
+				}
+				logger.Printf("Agente deletado: %s", agentID)
+				json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+				return
+			}
 			if len(parts) >= 3 && parts[2] == "telemetry" {
 				records, err := queryTelemetryByAgent(agentID, 20)
 				if err != nil {
@@ -1048,11 +1131,13 @@ func main() {
 	http.HandleFunc("/health", healthHandler)
 	http.HandleFunc("/poll/", pollHandler)
 	http.HandleFunc("/result/", resultHandler)
+	http.HandleFunc("/trigger/", triggerHandler)
 	http.HandleFunc("/api/", apiHandler)
 	http.HandleFunc("/events", eventsHandler)
 
 	addr := ":8080"
-	logger.Printf("Servidor ouvindo em %s", addr)
+	logger.Printf("Servidor HTTP ouvindo em %s", addr)
+
 	if err := http.ListenAndServe(addr, nil); err != nil {
 		logger.Fatalf("Erro ao iniciar servidor: %v", err)
 	}

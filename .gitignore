@@ -34,5 +34,8 @@ Thumbs.db
 *.o
 *.a
 
+# Dev notes
+botao.md
+
 # Test files
 *_test.go
